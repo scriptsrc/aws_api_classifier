@@ -1,10 +1,11 @@
 """
     Usage:
-        apiapi.py all
-        apiapi.py mutating
+        apiapi.py (all|mutating) [--csv=output_file]
 """
 
-from iampoliciesgonewild import global_permissions
+import csv
+from policyuniverse import global_permissions
+import re
 from tabulate import tabulate
 
 
@@ -21,25 +22,33 @@ for service_name, service_description in global_permissions.items():
     service = service_description['StringPrefix']
     permissions[service] = dict()
     for action in service_description['Actions']:
+
+        action_words = re.findall('[A-Z][^A-Z]*', action)
+        action_words = [word.lower() for word in action_words]
         permissions[service][action] = set()
+
         for tag_name, matches in TAGS.items():
             for match in matches:
-                # if action.lower().startswith(match):
-                if match in action.lower():
-                    permissions[service][action].add(tag_name)
+                try:
+                    if match in action_words:
+                        permissions[service][action].add(tag_name)
+                except IndexError:
+                    if action.lower().startswith(match):
+                        permissions[service][action].add(tag_name)
 
 headers = ['service', 'permission']
 headers.extend(TAGS.keys())
+
 
 def create_permissions_table():
     rows = []
     for service, actions in permissions.items():
         for action, tags in actions.items():
             row = [service, action]
-            
+
             for tag in TAGS.keys():
                 row.append(tag in tags)
-            
+
             rows.append(row)
     return rows
 
@@ -50,10 +59,10 @@ def create_mutating_table():
     for service, actions in permissions.items():
         for action, tags in actions.items():
             row = [service, action]
-            
+
             for tag in TAGS.keys():
                 row.append(tag in tags)
-            
+
             # CONTROL_PLANE && (MUTATING or SIDE_EFFECT)
             # if 'CONTROL_PLANE' in tags:
             if 'MUTATING' in tags:
@@ -63,12 +72,25 @@ def create_mutating_table():
     return rows
 
 
+def output_csv(filename, rows):
+    with open(filename, 'wb') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(headers)
+            for row in rows:
+                csv_writer.writerow(row)
+
+
 if __name__ == '__main__':
     from docopt import docopt
     args = docopt(__doc__, version="APIAPI 1.0")
-    if 'mutating' in args:
+    if args.get('mutating'):
         rows = create_mutating_table()
-    elif 'all'in args:
+    elif args.get('all'):
         rows = create_permissions_table()
-        
-    print tabulate(rows, headers=headers)
+
+    filename = args.get('--csv')
+
+    if filename:
+        output_csv(filename, rows)
+    else:
+        print tabulate(rows, headers=headers)
