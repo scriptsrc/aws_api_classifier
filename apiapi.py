@@ -85,7 +85,6 @@ def score_permission(permission, include_tags=True):
     """
     Returns a risk score for the provided permission.
 
-    TODO: Do we need to worry about case?
     LOW to HIGH RISK:
     READ                  1
     READ DATA_PLANE       1+1 = 2
