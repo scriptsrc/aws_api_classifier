@@ -1,6 +1,7 @@
 """
     Usage:
         apiapi.py (all|mutating) [--csv=output_file]
+        apiapi.py score <permission>
 """
 
 import csv
@@ -10,11 +11,11 @@ from tabulate import tabulate
 
 
 TAGS = {
-    'DATA_PLANE': ['object', 'bucket'],
+    'DATA_PLANE': ['object', 'message', 'publish'],
     'CONTROL_PLANE': ['policy', 'attribute', 'permission'],
     'MUTATING': ['create', 'delete', 'modify', 'add', 'remove', 'set', 'update', 'put'],
     'READ': ['get', 'view', 'list', 'describe'],
-    'SIDE_EFFECT': ['start', 'stop', 'export', 'request', 'resend', 'cancel', 'continue', 'estimate', 'execute', 'preview']
+    'SIDE_EFFECT': ['send', 'publish', 'start', 'stop', 'export', 'request', 'resend', 'cancel', 'continue', 'estimate', 'execute', 'preview']
 }
 
 permissions = dict()
@@ -25,16 +26,17 @@ for service_name, service_description in global_permissions.items():
 
         action_words = re.findall('[A-Z][^A-Z]*', action)
         action_words = [word.lower() for word in action_words]
-        permissions[service][action] = set()
+        permissions[service.lower()][action.lower()] = set()
 
         for tag_name, matches in TAGS.items():
             for match in matches:
                 try:
-                    if match in action_words:
-                        permissions[service][action].add(tag_name)
+                    for action_word in action_words:
+                        if match in action_word:
+                            permissions[service.lower()][action.lower()].add(tag_name)
                 except IndexError:
                     if action.lower().startswith(match):
-                        permissions[service][action].add(tag_name)
+                        permissions[service.lower()][action.lower()].add(tag_name)
 
 headers = ['service', 'permission']
 headers.extend(TAGS.keys())
@@ -79,6 +81,53 @@ def output_csv(filename, rows):
             for row in rows:
                 csv_writer.writerow(row)
 
+def score_permission(permission, include_tags=True):
+    """
+    Returns a risk score for the provided permission.
+
+    TODO: Do we need to worry about case?
+    LOW to HIGH RISK:
+    READ                  1
+    READ DATA_PLANE       1+1 = 2
+    READ CONTROL_PLANE    1+2 = 3
+
+    SIDE_EFFECT           4
+
+    MUTATING                  5
+    MUTATING DATA_PLANE       5+1 = 6
+    MUTATING CONTROL_PLANE    5+2 = 7
+    * Note: May come back with unusual tag combos until we have this perfected.
+
+    :param permission: Permission to score. Like 'ec2:DescribeInstances'
+    :param include_tags: When True, will return a set containing all tags associated with the permission [Default: True]
+    :return score: Format TBD
+    """
+    service = permission.split(':')[0].lower()
+    action = permission.split(':')[1].lower()
+    if service not in permissions.keys() or action not in permissions[service].keys():
+        if include_tags:
+            return None, None
+        return None
+
+    tags = permissions[service][action]
+    SCORES = {
+        'READ': 1,
+        'DATA_PLANE': 1,
+        'CONTROL_PLANE': 2,
+        'SIDE_EFFECT': 4,
+        'MUTATING': 5
+    }
+
+    score = 0
+    for tag in SCORES:
+        if tag in tags:
+            score += SCORES[tag]
+
+    if include_tags:
+        return score, tags
+    else:
+        return score
+
 
 if __name__ == '__main__':
     from docopt import docopt
@@ -87,6 +136,11 @@ if __name__ == '__main__':
         rows = create_mutating_table()
     elif args.get('all'):
         rows = create_permissions_table()
+    elif args.get('score'):
+        score, tags = score_permission(args.get('<permission>'))
+        print('Score: {}'.format(score))
+        print('Tags: {}'.format(tags))
+        exit()
 
     filename = args.get('--csv')
 
